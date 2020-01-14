@@ -47,15 +47,15 @@ def shopify_login_required(func):
     """
     @wraps(func)
     def decorated_view(*args, **kwargs):
-        shop_n_token = current_app.shopify.tokengetter_func()
-        if not shop_n_token:
+        shop_token = current_app.shopify.tokengetter_func()
+        if not shop_token:
             return redirect(url_for(
                 current_app.shopify.login_view,
                 shop=request.args.get('shop'),
                 next=request.url
             ))
 
-        with shopify.Session.temp(*shop_n_token):
+        with shopify.Session.temp(*shop_token):
             return func(*args, **kwargs)
 
     return decorated_view
@@ -113,8 +113,8 @@ class Shopify(object):
         ctx = _request_ctx_stack.top
         if shop_token is not None:
             # should be a valid token
-            domain, token = shop_token
-            shop_session = shopify.Session(domain, self.api_version, token)
+            domain, api_version, token = shop_token
+            shop_session = shopify.Session(domain, api_version, token)
             shopify.ShopifyResource.activate_session(shop_session)
             ctx.request.shopify_session = shop_session
         else:
@@ -144,7 +144,7 @@ class Shopify(object):
         shop_session = shopify.Session(request.args['shop'], self.api_version)
         token = shop_session.request_token(request.args)
         shopify.ShopifyResource.activate_session(shop_session)
-        self.tokensetter_func(request.args['shop'], token)
+        self.tokensetter_func(request.args['shop'], self.api_version, token)
         return shop_session
 
     def token_getter(self, f):
@@ -165,16 +165,18 @@ class Shopify(object):
     @classmethod
     def _session_token_getter(cls):
         try:
-            return session['SHOPIFY_SHOP'], session['SHOPIFY_TOKEN']
+            return session['SHOPIFY_SHOP'], session['SHOPIFY_API_VERSION'], session['SHOPIFY_TOKEN']
         except KeyError:
             return None
 
     @classmethod
-    def _session_token_setter(cls, shop, token):
+    def _session_token_setter(cls, shop, api_version, token):
         session['SHOPIFY_SHOP'] = shop
+        session['SHOPIFY_API_VERSION'] = api_version
         session['SHOPIFY_TOKEN'] = token
 
     def logout(self):
         session.pop('SHOPIFY_SHOP', None)
+        session.pop('SHOPIFY_API_VERSION', None)
         session.pop('SHOPIFY_TOKEN', None)
         shopify.ShopifyResource.clear_session()
